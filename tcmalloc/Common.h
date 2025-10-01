@@ -4,9 +4,17 @@
 #include <time.h>
 #include <assert.h>
 #include <thread>
+#include <mutex>
+
+#ifdef _WIN64
+    typedef unsigned long long PAGE_ID; 
+#elif _WIN32
+    typedef size_t PAGE_ID;
+#endif // _WIN64
 
 using std::cin;
 using std::cout;
+using std::endl;
 
 // threadcache最大缓存为256kb
 static const size_t MAX_BYTES = 256 * 1024;
@@ -183,4 +191,62 @@ public:
     }
 private:
     void* _freeList = nullptr;
+};
+
+
+
+// 管理大块跨度的内存空间
+struct Span
+{
+    PAGE_ID _pageId = 0; // 多个大块内存的起始页的页号
+    size_t _n = 0;       // 页的数量
+
+    Span* _next = nullptr;     // 双向链表的结构
+    Span* _prev = nullptr;
+
+    size_t _useCount = 0; // 切好的小块内存被分给threadCache的计数
+
+    void* _freeList = nullptr; // 自由链表
+};
+
+class SpanList
+{
+public:
+    // 默认构造函数
+    SpanList()
+    {
+        // 头节点初始化
+        _head = new Span;
+        _head->_next = _head;
+        _head->_prev = _head;
+    }
+
+    void Insert(Span* pos, Span* newSpan)
+    {
+        assert(pos);
+        assert(newSpan);
+        // 双向带头循环链表的插入
+        Span* prev = pos->_prev;
+        prev->_next = newSpan;
+        newSpan->_prev = prev;
+        newSpan->_next = pos;
+        pos->_prev = newSpan;
+    }
+
+    void Erase(Span* pos)
+    {
+        assert(pos);
+        assert(pos != _head);
+        Span* prev = pos->_prev;
+        Span* next = pos->_next;
+        prev->_next = next;
+        next->_prev = prev;
+        // 在这里我们要对删除的Span进行回收
+        // ...
+
+    }
+
+private:
+    Span* _head;
+    std::mutex _mtx;
 };
