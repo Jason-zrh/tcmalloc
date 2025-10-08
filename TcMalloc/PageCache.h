@@ -2,7 +2,7 @@
 #include "Common.h"
 
 
-// PageCacheҲʹ�õ���ģʽ
+// PageCache也使用单例模式
 class PageCache
 {
 public:
@@ -10,8 +10,8 @@ public:
 	{
 		return &_sInst;
 	}
-
 	Span* NewSpan(size_t size);
+	std::mutex _pageMtx;
 
 private:
 	PageCache()
@@ -21,5 +21,5 @@ private:
 
 private:
 	SpanList _spanLists[NPAGES];
-	std::mutex _pageMtx;
+
 };
