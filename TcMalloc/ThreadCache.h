@@ -4,21 +4,20 @@
 class ThreadCache
 {
 public:
-    // ÉêÇëºÍÊÍ·ÅÄÚ´æ¶ÔÏó
+    // ç”³è¯·å’Œé‡Šæ”¾å†…å­˜å¯¹è±¡
     void* Allocate(size_t size);
     void Deallocate(void* ptr, size_t size);
 
-    // ´ÓÖĞĞÄ»ñÈ¡ÄÚ´æ¶ÔÏó
+    // ä»ä¸­å¿ƒè·å–å†…å­˜å¯¹è±¡
     void* FetchFromCentralCache(size_t index, size_t size);
 
 
-
-
 private:
+    // å“ˆå¸Œæ¡¶ç»“æ„å­˜å‚¨è‡ªç”±é“¾è¡¨
     FreeList _freeLists[NFREE_LISTS];
 };
 
-// TLS (thread local storage )ÊÇÒ»ÖÖ±äÁ¿´¢´æ·½·¨£¬Õâ¸ö±äÁ¿ÔÚËüËùÔÚµÄÏß³ÌÄÚÊÇÈ«¾Ö¿ÉÒÔ·ÃÎÊµÄ£¬µ«ÊÇ²»ÄÜ±»ÆäËûÏß³Ì·ÃÎÊµ½
-// ´Ó¶ø±£³ÖÁËÊı¾İµÄÏß³Ì¶ÀÁ¢ĞÔ, ÊµÏÖÁËÏß³ÌµÄTLSÎŞËø·ÃÎÊ
-static thread_local ThreadCache* pTLSThreadCache = nullptr;  // ÕâÀï¼ÓÒ»¸östatic¿ÉÒÔ±£³ÖÖ»ÔÚµ±Ç°ÎÄ¼ş¿É¼û
+// TLS (thread local storage )æ˜¯ä¸€ç§å˜é‡å‚¨å­˜æ–¹æ³•ï¼Œè¿™ä¸ªå˜é‡åœ¨å®ƒæ‰€åœ¨çš„çº¿ç¨‹å†…æ˜¯å…¨å±€å¯ä»¥è®¿é—®çš„ï¼Œä½†æ˜¯ä¸èƒ½è¢«å…¶ä»–çº¿ç¨‹è®¿é—®åˆ°
+// ä»è€Œä¿æŒäº†æ•°æ®çš„çº¿ç¨‹ç‹¬ç«‹æ€§, å®ç°äº†çº¿ç¨‹çš„TLSæ— é”è®¿é—®
+static thread_local ThreadCache* pTLSThreadCache = nullptr;  // è¿™é‡ŒåŠ ä¸€ä¸ªstaticå¯ä»¥ä¿æŒåªåœ¨å½“å‰æ–‡ä»¶å¯è§
 
