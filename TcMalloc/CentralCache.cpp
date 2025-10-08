@@ -1,86 +1,75 @@
+#include "ThreadCache.h"
 #include "CentralCache.h"
-#include "PageCache.h"
 
 
-// µ¥ÀıÄ£Ê½¶ÔÏó¶¨Òå
-CentralCache CentralCache::_sInst;
-
-Span* CentralCache::GetOneSpan(SpanList& spanlist, size_t size)
+// ThreadCacheç”³è¯·sizeå¤§å°çš„å†…å­˜
+void* ThreadCache::Allocate(size_t size)
 {
-	// Á½ÖÖÇé¿ö£º1.ÊÇspanlistÖĞÓĞspan 2.Ã»ÓĞÁË£¬È¥centralCacheÖĞÉêÇë
-	Span* it = spanlist.Begin();
-	while (it != spanlist.End())
-	{
-		if (it->_freeList != nullptr)
-		{
-			return it;
-		}
-		else
-		{
-			it = it->_next;
-		}
-	}
+    assert(size <= MAX_BYTES);
+    // å…ˆå¯¹é½å†…å­˜, è®¡ç®—åº”è¯¥ç»™sizeä»€ä¹ˆå¯¹é½æ–¹å¼
+    size_t alginSize = SizeClass::RoundUp(size);
+    // è®¡ç®—è‡ªç”±é“¾è¡¨ä¸­æ¡¶çš„ä½ç½®
+    size_t index = SizeClass::Index(alginSize);
 
-	// ¸ÃÕÒPageCacheÒªÁË
-	Span* span = PageCache::GetInstance()->NewSpan(SizeClass::NumMovePage(size));
-
-	// ÒÑ¾­ÉêÇëµ½spanÁË£¬½ÓÏÂÀ´Òª°ÑspanÇĞºÃÒÔºó¹ÒÆğÀ´
-	// Ê×ÏÈÒªÍ¨¹ıÒ³ºÅËã³öÒ³µÄÆğÊ¼µØÖ·
-	char* start = (char*)(span->_pageId << PAGE_SHIFT);
-	// ¼ÆËãÒ»¸öspanÓĞ¶àÉÙÄÚ´æ
-	size_t bytes = span->_n << PAGE_SHIFT;
-	char* end = start + bytes;
-	// °Ñ´ó¿éÄÚ´æÇĞ³É×ÔÓÉÁ´±í¹ÒÆğÀ´
-	// ÏÈÇĞÒ»¿é×öÍ·£¬·½±ãÎ²²å
-	span->_freeList = start;
-	start += size;
-	void* tail = span->_freeList;
-	while (start < end)
-	{
-		// ÕâÀïÍÆ¼öÓÃÎ²²åÒòÎªĞ¡¿éµØÖ·µÄÄÚ´æÊÇÁ¬ĞøµÄ£¬»º´æÃüÖĞ±È½Ï¸ß
-		NextObj(tail) = start;
-		// ¸üĞÂÎ²
-		tail = start;
-		start += size;
-	}
-
-	spanlist.PushFront(span);
-
-	return span;
+    // è‡ªç”±é“¾è¡¨ä¸­ä¸ä¸ºç©ºï¼Œç›´æ¥å–ä¸€ä¸ªå†…å­˜å¯¹è±¡è¿”å›
+    if (!_freeLists[index].Empty())
+    {
+        return _freeLists[index].Pop();
+    }
+    // è‡ªç”±é“¾è¡¨ä¸ºç©ºï¼Œä»CentralCaCheç”³è¯·å†…å­˜å¯¹è±¡
+    else
+    {
+        return FetchFromCentralCache(index, alginSize);
+    }
 }
 
-// threadcacheÏòcentralcacheÅúÁ¿ÉêÇë¶ÔÏó£¬·µ»ØÖµÊÇ³É¹¦ÉêÇë¶ÔÏóµÄ¸öÊı£¬Ç°Á½¸ö²ÎÊıÊÇÊä³öĞÍ²ÎÊı
-size_t CentralCache::FetchRangeObj(void*& start, void*& end, size_t batchNum, size_t size)
+void ThreadCache::Deallocate(void* ptr, size_t size)
 {
-	size_t index = SizeClass::Index(size);
-	// ÏÈÉÏÍ°Ëø
-	_spanList[index]._mtx.lock();
-
-	Span* span = GetOneSpan(_spanList[index], size);
-	// spanÈ¡µ½ÁË£¬ÇÒspanÀïÃæ²»Îª¿Õ
-	assert(span);
-	assert(span->_freeList);
-
-	// ´ÓÕÒµÄspanÖĞÈ¡³öbatchNum¸ö±äÁ¿
-	start = span->_freeList;
-	end = start;
-	// ÕâÀïÓÃendÀ´±éÀúspan
-	size_t i = 0;
-	size_t actualNum = 1;
-	// ´ÓspanÖĞ»ñÈ¡batchNum¸ö¶ÔÏó£¬Èç¹û²»¹»ÔòÓĞ¼¸¸öÄÃ¼¸¸ö
-	while (i < batchNum - 1 && NextObj(end) != nullptr)
-	{
-		end = NextObj(end);
-		i++;
-		actualNum++;
-	}
-	span->_freeList = NextObj(end);
-	NextObj(end) = nullptr;
-
-	// ÓĞËø¾ÍÒ»¶¨Òª½âËø
-	_spanList[index]._mtx.unlock();
-	return actualNum;
+    assert(size <= MAX_BYTES);
+    assert(ptr);
+    // è®¡ç®—æ¡¶çš„ä½ç½®
+    size_t index = SizeClass::Index(size);
+    // å¤´æ’åˆ°è‡ªç”±é“¾è¡¨
+    _freeLists[index].Push(ptr);
 }
 
+// CentralCacheè·å–å†…å­˜å¯¹è±¡
+// CentralCacheçš„ç»“æ„ä¹Ÿæ˜¯å“ˆå¸Œæ¡¶ï¼Œä¸è¿‡æ¯ä¸ªæ¡¶ä¸­è£…çš„æ˜¯å«æœ‰åˆ‡å¥½å†…å­˜å¯¹è±¡çš„Spanï¼Œè¿™äº›spanç”¨åŒå‘é“¾è¡¨çš„ç»“æ„è¿åœ¨ä¸€èµ·ï¼Œæ˜ å°„å…³ç³»ä¸threadcacheç›¸åŒï¼Œæ‰€ä»¥å¯ä»¥ç›´æ¥æŠŠindexä¼ è¿‡æ¥
+void* ThreadCache::FetchFromCentralCache(size_t index, size_t size)
+{
+    // è¿™é‡Œä½¿ç”¨æ…¢å¼€å§‹åé¦ˆè°ƒèŠ‚ç®—æ³•
+    // 1.æœ€å¼€å§‹ä¸ä¼šä¸€æ¬¡è¦å¤ªå¤šï¼Œå› ä¸ºå¯èƒ½è¦å¤ªå¤šäº†å¯èƒ½ç”¨ä¸å®Œ
+    // 2.å¦‚æœæœ‰ä¸æ–­è¿™ä¸ªå†…å­˜å¤§å°çš„éœ€æ±‚ï¼Œå°±ä¼šä¸æ–­å¢é•¿ï¼Œç›´åˆ°ä¸Šé™
+    // 3.å¯¹è±¡è¶Šå°ï¼Œä¸Šé™è¶Šå¤§ï¼Œå¯¹è±¡è¶Šå¤§ï¼Œä¸Šé™è¶Šä½
+
+    // è¿™é‡ŒThreadCacheè™½ç„¶åªè¦äº†ä¸€ä¸ªï¼Œä½†æ˜¯è¿˜æ˜¯ç»™å‡ºä¸€æ‰¹å¯¹è±¡ï¼Œè¿™æ ·å¯ä»¥å‡å°‘é”ç«äº‰
+    size_t batchNum = min(_freeLists[index].maxSize(), SizeClass::NumMovSize(size));
+    if (batchNum == _freeLists[index].maxSize())
+    {
+        // ä»1ä¸ªå¯¹è±¡å¼€å§‹è·å–ï¼Œç›´åˆ°è·å–åˆ°æœ€å¤§å€¼
+        // åœ¨è¿™é‡Œå¯ä»¥è°ƒæ•´åé¦ˆé€Ÿåº¦å¿«æ…¢
+        _freeLists[index].maxSize() += 1;
+    }
 
 
+    // è¾“å‡ºå‹å‚æ•°
+    void* start = nullptr;
+    void* end = nullptr;
+    // æœ‰å¤šå°‘å†…å­˜å°±è¿”å›å¤šå°‘ï¼Œå¦‚æœcentralcacheé‡Œé¢çš„ä¸å¤Ÿäº†ï¼Œå°±è¿”å›ç»™äº†å¤šå°‘ä¸ª
+    // å› ä¸ºæœ‰å¯èƒ½æ˜¯å¤šä¸ªçº¿ç¨‹åŒæ—¶å‘centralcacheå‘å‡ºéœ€æ±‚ï¼Œæ‰€ä»¥è¿™é‡Œè®¾ä¸ºå•ä¾‹æ¨¡å¼ï¼Œå¹¶ä¸”æ¯æ¬¡è¦åŠ æ¡¶é”
+    size_t actulNum = CentralCache::GetInstance()->FetchRangeObj(start, end, batchNum, size);
+    // è¿™é‡Œå‘Central Cacheæ‰¹é‡è¦ï¼Œå¯èƒ½ç»™ä¸å…¨ï¼Œä½†æ˜¯è‡³å°‘åº”è¯¥ç»™ä¸€ä¸ªï¼Œå¦åˆ™å°±è¦æŠ›å¼‚å¸¸äº†
+    assert(actulNum > 0);
+    // å¦‚æœåªå¼€è¾Ÿäº†ä¸€ä¸ªï¼Œåˆ™ç›´æ¥è¿”å›
+    if (actulNum == 1)
+    {
+        assert(start == end);
+        return start;
+    }
+    // è¿”å›å€¼é•¿åº¦ä¸æ­¢ä¸€ä¸ªï¼Œåˆ™æ‹¿å‡ºä¸€ä¸ªæ¥è¿”å›
+    else
+    {
+        _freeLists[index].PushRange(NextObj(start), end);
+        return start;
+    }
+}
