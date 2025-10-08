@@ -2,24 +2,24 @@
 #include "CentralCache.h"
 
 
-// ThreadCacheÉêÇësize´óĞ¡µÄÄÚ´æ
+// ThreadCacheç”³è¯·sizeå¤§å°çš„å†…å­˜
 void* ThreadCache::Allocate(size_t size)
 {
     assert(size <= MAX_BYTES);
-    // ÏÈ¶ÔÆëÄÚ´æ, ¼ÆËãÓ¦¸Ã¸øsizeÊ²Ã´¶ÔÆë·½Ê½
+    // å…ˆå¯¹é½å†…å­˜, è®¡ç®—åº”è¯¥ç»™sizeä»€ä¹ˆå¯¹é½æ–¹å¼
     size_t alginSize = SizeClass::RoundUp(size);
-    // ¼ÆËã×ÔÓÉÁ´±íÖĞÍ°µÄÎ»ÖÃ
-    size_t index = SizeClass::Index(size);
+    // è®¡ç®—è‡ªç”±é“¾è¡¨ä¸­æ¡¶çš„ä½ç½®
+    size_t index = SizeClass::Index(alginSize);
 
-    // ×ÔÓÉÁ´±íÖĞ²»Îª¿Õ£¬Ö±½ÓÈ¡Ò»¸öÄÚ´æ¶ÔÏó·µ»Ø
+    // è‡ªç”±é“¾è¡¨ä¸­ä¸ä¸ºç©ºï¼Œç›´æ¥å–ä¸€ä¸ªå†…å­˜å¯¹è±¡è¿”å›
     if (!_freeLists[index].Empty())
     {
         return _freeLists[index].Pop();
     }
-    // ×ÔÓÉÁ´±íÎª¿Õ£¬´ÓCentralCaCheÉêÇëÄÚ´æ¶ÔÏó
+    // è‡ªç”±é“¾è¡¨ä¸ºç©ºï¼Œä»CentralCaCheç”³è¯·å†…å­˜å¯¹è±¡
     else
     {
-        return FetchFromCentralCache(index, size);
+        return FetchFromCentralCache(index, alginSize);
     }
 }
 
@@ -27,46 +27,46 @@ void ThreadCache::Deallocate(void* ptr, size_t size)
 {
     assert(size <= MAX_BYTES);
     assert(ptr);
-    // ¼ÆËãÍ°µÄÎ»ÖÃ
+    // è®¡ç®—æ¡¶çš„ä½ç½®
     size_t index = SizeClass::Index(size);
-    // Í·²åµ½×ÔÓÉÁ´±í
+    // å¤´æ’åˆ°è‡ªç”±é“¾è¡¨
     _freeLists[index].Push(ptr);
 }
 
-// CentralCache»ñÈ¡ÄÚ´æ¶ÔÏó
-// CentralCacheµÄ½á¹¹Ò²ÊÇ¹şÏ£Í°£¬²»¹ıÃ¿¸öÍ°ÖĞ×°µÄÊÇº¬ÓĞÇĞºÃÄÚ´æ¶ÔÏóµÄSpan£¬ÕâĞ©spanÓÃË«ÏòÁ´±íµÄ½á¹¹Á¬ÔÚÒ»Æğ£¬Ó³Éä¹ØÏµÓëthreadcacheÏàÍ¬£¬ËùÒÔ¿ÉÒÔÖ±½Ó°Ñindex´«¹ıÀ´
+// CentralCacheè·å–å†…å­˜å¯¹è±¡
+// CentralCacheçš„ç»“æ„ä¹Ÿæ˜¯å“ˆå¸Œæ¡¶ï¼Œä¸è¿‡æ¯ä¸ªæ¡¶ä¸­è£…çš„æ˜¯å«æœ‰åˆ‡å¥½å†…å­˜å¯¹è±¡çš„Spanï¼Œè¿™äº›spanç”¨åŒå‘é“¾è¡¨çš„ç»“æ„è¿åœ¨ä¸€èµ·ï¼Œæ˜ å°„å…³ç³»ä¸threadcacheç›¸åŒï¼Œæ‰€ä»¥å¯ä»¥ç›´æ¥æŠŠindexä¼ è¿‡æ¥
 void* ThreadCache::FetchFromCentralCache(size_t index, size_t size)
 {
-    // ÕâÀïÊ¹ÓÃÂı¿ªÊ¼·´À¡µ÷½ÚËã·¨
-    // 1.×î¿ªÊ¼²»»áÒ»´ÎÒªÌ«¶à£¬ÒòÎª¿ÉÄÜÒªÌ«¶àÁË¿ÉÄÜÓÃ²»Íê
-    // 2.Èç¹ûÓĞ²»¶ÏÕâ¸öÄÚ´æ´óĞ¡µÄĞèÇó£¬¾Í»á²»¶ÏÔö³¤£¬Ö±µ½ÉÏÏŞ
-    // 3.¶ÔÏóÔ½Ğ¡£¬ÉÏÏŞÔ½´ó£¬¶ÔÏóÔ½´ó£¬ÉÏÏŞÔ½µÍ
+    // è¿™é‡Œä½¿ç”¨æ…¢å¼€å§‹åé¦ˆè°ƒèŠ‚ç®—æ³•
+    // 1.æœ€å¼€å§‹ä¸ä¼šä¸€æ¬¡è¦å¤ªå¤šï¼Œå› ä¸ºå¯èƒ½è¦å¤ªå¤šäº†å¯èƒ½ç”¨ä¸å®Œ
+    // 2.å¦‚æœæœ‰ä¸æ–­è¿™ä¸ªå†…å­˜å¤§å°çš„éœ€æ±‚ï¼Œå°±ä¼šä¸æ–­å¢é•¿ï¼Œç›´åˆ°ä¸Šé™
+    // 3.å¯¹è±¡è¶Šå°ï¼Œä¸Šé™è¶Šå¤§ï¼Œå¯¹è±¡è¶Šå¤§ï¼Œä¸Šé™è¶Šä½
 
-    // ÕâÀïThreadCacheËäÈ»Ö»ÒªÁËÒ»¸ö£¬µ«ÊÇ»¹ÊÇ¸ø³öÒ»Åú¶ÔÏó£¬ÕâÑù¿ÉÒÔ¼õÉÙËø¾ºÕù
-    size_t batchNum = std::min(_freeLists[index].maxSize(), SizeClass::NumMovSize(size));
+    // è¿™é‡ŒThreadCacheè™½ç„¶åªè¦äº†ä¸€ä¸ªï¼Œä½†æ˜¯è¿˜æ˜¯ç»™å‡ºä¸€æ‰¹å¯¹è±¡ï¼Œè¿™æ ·å¯ä»¥å‡å°‘é”ç«äº‰
+    size_t batchNum = min(_freeLists[index].maxSize(), SizeClass::NumMovSize(size));
     if (batchNum == _freeLists[index].maxSize())
     {
-        // ´Ó1¸ö¶ÔÏó¿ªÊ¼»ñÈ¡£¬Ö±µ½»ñÈ¡µ½×î´óÖµ
-        // ÔÚÕâÀï¿ÉÒÔµ÷Õû·´À¡ËÙ¶È¿ìÂı
+        // ä»1ä¸ªå¯¹è±¡å¼€å§‹è·å–ï¼Œç›´åˆ°è·å–åˆ°æœ€å¤§å€¼
+        // åœ¨è¿™é‡Œå¯ä»¥è°ƒæ•´åé¦ˆé€Ÿåº¦å¿«æ…¢
         _freeLists[index].maxSize() += 1;
     }
 
 
-    // Êä³öĞÍ²ÎÊı
+    // è¾“å‡ºå‹å‚æ•°
     void* start = nullptr;
     void* end = nullptr;
-    // ÓĞ¶àÉÙÄÚ´æ¾Í·µ»Ø¶àÉÙ£¬Èç¹ûcentralcacheÀïÃæµÄ²»¹»ÁË£¬¾Í·µ»Ø¸øÁË¶àÉÙ¸ö
-    // ÒòÎªÓĞ¿ÉÄÜÊÇ¶à¸öÏß³ÌÍ¬Ê±Ïòcentralcache·¢³öĞèÇó£¬ËùÒÔÕâÀïÉèÎªµ¥ÀıÄ£Ê½£¬²¢ÇÒÃ¿´ÎÒª¼ÓÍ°Ëø
+    // æœ‰å¤šå°‘å†…å­˜å°±è¿”å›å¤šå°‘ï¼Œå¦‚æœcentralcacheé‡Œé¢çš„ä¸å¤Ÿäº†ï¼Œå°±è¿”å›ç»™äº†å¤šå°‘ä¸ª
+    // å› ä¸ºæœ‰å¯èƒ½æ˜¯å¤šä¸ªçº¿ç¨‹åŒæ—¶å‘centralcacheå‘å‡ºéœ€æ±‚ï¼Œæ‰€ä»¥è¿™é‡Œè®¾ä¸ºå•ä¾‹æ¨¡å¼ï¼Œå¹¶ä¸”æ¯æ¬¡è¦åŠ æ¡¶é”
     size_t actulNum = CentralCache::GetInstance()->FetchRangeObj(start, end, batchNum, size);
+    // è¿™é‡Œå‘Central Cacheæ‰¹é‡è¦ï¼Œå¯èƒ½ç»™ä¸å…¨ï¼Œä½†æ˜¯è‡³å°‘åº”è¯¥ç»™ä¸€ä¸ªï¼Œå¦åˆ™å°±è¦æŠ›å¼‚å¸¸äº†
     assert(actulNum > 0);
-
-    // Èç¹ûÖ»¿ª±ÙÁËÒ»¸ö£¬ÔòÖ±½Ó·µ»Ø
+    // å¦‚æœåªå¼€è¾Ÿäº†ä¸€ä¸ªï¼Œåˆ™ç›´æ¥è¿”å›
     if (actulNum == 1)
     {
         assert(start == end);
         return start;
     }
-    // ·µ»ØÖµ³¤¶È²»Ö¹Ò»¸ö£¬ÔòÄÃ³öÒ»¸öÀ´·µ»Ø
+    // è¿”å›å€¼é•¿åº¦ä¸æ­¢ä¸€ä¸ªï¼Œåˆ™æ‹¿å‡ºä¸€ä¸ªæ¥è¿”å›
     else
     {
         _freeLists[index].PushRange(NextObj(start), end);
