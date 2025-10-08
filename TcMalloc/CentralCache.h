@@ -1,34 +1,28 @@
 #pragma once
 #include "Common.h"
 
-// µ¥ÀıÄ£Ê½
+// å•ä¾‹æ¨¡å¼
 class CentralCache
 {
 public:
-
-	// »ñÈ¡Ò»¸ö·Ç¿ÕSpan
+	// è·å–ä¸€ä¸ªéç©ºSpan
 	Span* GetOneSpan(SpanList& spanList, size_t size);
-	 
-
 	size_t FetchRangeObj(void*& start, void*& end, size_t batchNum, size_t size);
 private:
-	// ¶öººĞÍµ¥ÀıÄ£Ê½
-	// ¹¹Ôìº¯ÊıºÍ¿½±´¹¹Ôì±ä³ÉË½ÓĞ
+	// é¥¿æ±‰å‹å•ä¾‹æ¨¡å¼
+	// æ„é€ å‡½æ•°å’Œæ‹·è´æ„é€ å˜æˆç§æœ‰
 	CentralCache()
 	{ }
-
 	CentralCache(const CentralCache&) = delete;
 
-	// ÀàÀïÃæÉùÃ÷
+	// ç±»é‡Œé¢å£°æ˜
 	static CentralCache _sInst;
-
 public:
 	static CentralCache* GetInstance()
 	{
 		return &_sInst;
 	}
-
 private:
-	// centralcacheµÄ¹şÏ£Í°
+	// centralcacheçš„å“ˆå¸Œæ¡¶
 	SpanList _spanList[NFREE_LISTS];
 };
