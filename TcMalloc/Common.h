@@ -6,13 +6,19 @@
 #include <thread>
 #include <mutex>
 #include <algorithm>
+#include <unordered_map>
+#include <atomic>
 
+using std::cin;
+using std::cout;
+using std::endl;
+
+// 条件编译适配不同平台
 #ifdef _WIN32
     #include <windows.h>
 #else
-    // Linux
+    // Linux，macos
 #endif
-
 
 #ifdef _WIN64
 typedef unsigned long long PAGE_ID;
@@ -33,17 +39,30 @@ inline static void* SystemAlloc(size_t kpage)
 
     return ptr;
 }
-using std::cin;
-using std::cout;
-using std::endl;
+
+inline static void SystemFree(void* ptr)
+{
+    #ifdef _WIN32
+        VirtualFree(ptr, 0, MEM_RELEASE);
+    #else
+        // sbrk unmmap等
+    #endif
+}
+
 
 // threadcache最大缓存为256kb
 static const size_t MAX_BYTES = 256 * 1024;
+// threadcache和centralcache中映射哈希桶的数量
 static const size_t NFREE_LISTS = 208;
 // 数组下标从0开始
 static const size_t NPAGES = 129;
-// 这里定义一页是8kb，8 * 1024 = 2^3 * 2^10
+// 定义一页内存的大小
 static const size_t PAGE_SHIFT = 13;
+
+
+
+
+
 
 // 如果一个字节对齐一次的话将会有20w+自由链表，所以我们采用下面的对齐方式
 // 这种对齐方式可以做到10%左右的内碎片浪费
@@ -54,8 +73,6 @@ static const size_t PAGE_SHIFT = 13;
 // 128bits        |      [1024 + 1, 8 * 1024]             |    [72, 128)
 // 1024bits       |      [8 * 1024 + 1, 64 * 1024]        |    [128, 184)
 // 8 * 1024bits   |      [64 * 1024 + 1, 256 * 1024]      |    [184, 208) 
-
-
 class SizeClass
 {
 public:
@@ -114,9 +131,7 @@ public:
         }
         else
         {
-            // 出现错误返回
-            assert(false);
-            return -1;
+            return _RoundUp(size, 1 << PAGE_SHIFT);
         }
     }
 
@@ -141,10 +156,12 @@ public:
         return ((byte + (1 << alignNum_shift) - 1) >> alignNum_shift) - 1;
     }
 
+
+    // 通过给出的对象大小计算下标
     static size_t Index(size_t bytes)
     {
         assert(bytes <= MAX_BYTES);
-        static int array[4] = { 16, 56, 56, 56 }; // 标记每个区块有多少个链表， 实际上是16，56，56，56，34个自由链表
+        static size_t array[4] = { 16, 56, 56, 56 }; // 标记每个区块有多少个链表， 实际上是16，56，56，56，34个自由链表
         if (bytes <= 128)
         {
             // 8bits对齐，在第一个区块,2^3
@@ -198,6 +215,7 @@ public:
     // 计算一次向系统要几页
     static size_t NumMovePage(size_t size)
     {
+        // 对象大小越大，则一次向系统要的越多
         size_t num = NumMovSize(size);
         size_t npage = num * size;
         npage >>= PAGE_SHIFT;
@@ -215,11 +233,10 @@ public:
 // 用于取出自由链表前4 / 8个字节
 static void*& NextObj(void* obj)
 {
-    return *((void**)obj);
+    return *((void**)obj); // 在x32下，一个void*的大小是4字节，而x64下，一个void*的大小是8字节，将内存对象转化为void**再解引用就可以获得前4 / 8字节来储存下一个内存对象的地址了
 }
 
-
-// 自由链表的定义
+// 自由链表的定义，这里的自由链表是单链表
 class FreeList
 {
 public:
@@ -229,13 +246,15 @@ public:
         // 头插
         NextObj(obj) = _freeList;
         _freeList = obj;
+        _size++;
     }
 
     // 插入一串内存对象
-    void PushRange(void* start, void* end)
+    void PushRange(void* start, void* end, size_t n)
     {
         NextObj(end) = _freeList;
         _freeList = start;
+        _size += n;
     }
 
     void* Pop()
@@ -244,7 +263,25 @@ public:
         // 头删
         void* obj = _freeList;
         _freeList = NextObj(obj);
+        _size--;
         return obj;
+    }
+
+    // 弹出一些对象，输出型参数不需要返回值 
+    void PopRange(void*& start, void*& end, size_t n)
+    {
+        assert(n <= _size);
+        // 把头给到start
+        start = _freeList;
+        end = start;
+        for (size_t i = 0; i < n - 1; i++)
+        {
+            end = NextObj(end);
+        }
+        // 把end的下一个赋给_freeList
+        _freeList = NextObj(end);
+        NextObj(end) = nullptr;
+        _size -= n;
     }
 
     bool Empty()
@@ -252,27 +289,40 @@ public:
         return _freeList == nullptr;
     }
 
+    // 慢开始算法需要
     size_t& maxSize()
     {
         return _maxSize;
     }
 
+    // 回收内存需要
+    size_t Size()
+    {
+        return _size;
+    }
 private:
     void* _freeList = nullptr;
     size_t _maxSize = 1;
+    size_t _size = 0;
 };
 
-// 管理大块跨度的内存空间
+
+
+// Span -> 管理大块跨度的内存空间
+// 一个span中的内存大小不是固定的，可以是1页也可以是很多页，以双向带头循环链表维护
 struct Span
 {
-    PAGE_ID _pageId = 0; // 多个大块内存的起始页的页号
+    PAGE_ID _pageId = 0; // 页号
     size_t _n = 0;       // 页的数量
 
     Span* _next = nullptr;     // 双向链表的结构
     Span* _prev = nullptr;
 
     size_t _useCount = 0; // 切好的小块内存被分给threadCache的计数
+    size_t _objSize = 0;  // 切好的内存的大小
 
+    // 记录这个span是否在使用
+    bool _isUse = false;
     void* _freeList = nullptr; // 自由链表
 };
 
@@ -295,9 +345,8 @@ public:
     }
     Span* End()
     {
-        return _head->_prev;
+        return _head; //带头双向循环链表的end返回的是head
     }
-
 
     void Insert(Span* pos, Span* newSpan)
     {
@@ -335,11 +384,11 @@ public:
         return front;
     }
 
-
     void PushFront(Span* span)
     {
         Insert(Begin(), span);
     }
+
 private:
     Span* _head;
 public:
