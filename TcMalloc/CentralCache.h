@@ -8,6 +8,9 @@ public:
 	// 获取一个非空Span
 	Span* GetOneSpan(SpanList& spanList, size_t size);
 	size_t FetchRangeObj(void*& start, void*& end, size_t batchNum, size_t size);
+
+	// 将⼀定数量的对象释放到span跨度
+	void ReleaseListToSpans(void* start, size_t size);
 private:
 	// 饿汉型单例模式
 	// 构造函数和拷贝构造变成私有
@@ -24,5 +27,5 @@ public:
 	}
 private:
 	// centralcache的哈希桶
-	SpanList _spanList[NFREE_LISTS];
+	SpanList _spanLists[NFREE_LISTS];
 };
