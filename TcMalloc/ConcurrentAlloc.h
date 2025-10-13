@@ -1,27 +1,64 @@
 #pragma once
 #include "Common.h"
 #include "ThreadCache.h"
+#include "PageCache.h"
+#include "ObjectPool.h"
 
-
-// ´´½¨¶ÔÏóÉêÇëÄÚ´æ
+// åˆ›å»ºå¯¹è±¡ç”³è¯·å†…å­˜
 static void* ConcurrentAlloc(size_t size)
 {
-    // ÓÃTLS(thread local storage)À´×öµ½ÔÚthreadcacheÉêÇëÄÚ´æµÄÊ±ºò²»ÐèÒª¼ÓËø
-
-    // µÚÒ»´ÎÉêÇëµÄÊ±ºò
-    if (pTLSThreadCache == nullptr)
+    // å½“ç”³è¯·å†…å­˜å¤§å°å¤§äºŽthreadcacheçš„256kbæ—¶èµ°å¤§å—å†…å­˜ç”³è¯·æµç¨‹
+    if (size > MAX_BYTES)
     {
-        pTLSThreadCache = new ThreadCache;
+        size_t alignSize = SizeClass::RoundUp(size);
+        size_t kpage = alignSize >> PAGE_SHIFT;
+
+        PageCache::GetInstance()->_pageMtx.lock();
+
+        Span* span = PageCache::GetInstance()->NewSpan(kpage);
+        span->_objSize = size;
+
+        PageCache::GetInstance()->_pageMtx.unlock();
+        void* ptr = (void*)(span->_pageId << PAGE_SHIFT);
+        return ptr;
+    }
+    else
+    {
+        // ç”¨TLS(thread local storage)æ¥åšåˆ°åœ¨threadcacheç”³è¯·å†…å­˜çš„æ—¶å€™ä¸éœ€è¦åŠ é”
+        // ç¬¬ä¸€æ¬¡ç”³è¯·çš„æ—¶å€™
+        if (pTLSThreadCache == nullptr)
+        {
+            static ObjectPool<ThreadCache> tcPool;
+            //pTLSThreadCache = new ThreadCache;
+            pTLSThreadCache = tcPool.New();
+        }
+
+        // cout << std::this_thread::get_id() << ":" << pTLSThreadCache << std::endl;
+        return pTLSThreadCache->Allocate(size);
     }
 
-    cout << std::this_thread::get_id() << ":" << pTLSThreadCache << std::endl;
-    return pTLSThreadCache->Allocate(size);
+    
 }
 
 
 
-static void ConcurrentFree(void* ptr, size_t size)
+// é‡Šæ”¾å†…å­˜
+static void ConcurrentFree(void* ptr)
 {
-    assert(pTLSThreadCache);
-    pTLSThreadCache->Deallocate(ptr, size);
+
+    Span* span = PageCache::GetInstance()->MapObjectToSpan(ptr);
+    size_t size = span->_objSize;
+
+    if (size > MAX_BYTES)
+    {
+        PageCache::GetInstance()->_pageMtx.lock();
+        PageCache::GetInstance()->ReleaseSpanToPageCache(span);
+        PageCache::GetInstance()->_pageMtx.unlock();
+    }
+    else
+    {
+        assert(pTLSThreadCache);
+        // ç›´æŽ¥è°ƒç”¨Deallocateå‡½æ•°
+        pTLSThreadCache->Deallocate(ptr, size);
+    }
 }
