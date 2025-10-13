@@ -23,15 +23,6 @@ void* ThreadCache::Allocate(size_t size)
     }
 }
 
-void ThreadCache::Deallocate(void* ptr, size_t size)
-{
-    assert(size <= MAX_BYTES);
-    assert(ptr);
-    // 计算桶的位置
-    size_t index = SizeClass::Index(size);
-    // 头插到自由链表
-    _freeLists[index].Push(ptr);
-}
 
 // CentralCache获取内存对象
 // CentralCache的结构也是哈希桶，不过每个桶中装的是含有切好内存对象的Span，这些span用双向链表的结构连在一起，映射关系与threadcache相同，所以可以直接把index传过来
@@ -51,7 +42,6 @@ void* ThreadCache::FetchFromCentralCache(size_t index, size_t size)
         _freeLists[index].maxSize() += 1;
     }
 
-
     // 输出型参数
     void* start = nullptr;
     void* end = nullptr;
@@ -69,7 +59,38 @@ void* ThreadCache::FetchFromCentralCache(size_t index, size_t size)
     // 返回值长度不止一个，则拿出一个来返回
     else
     {
-        _freeLists[index].PushRange(NextObj(start), end);
+        _freeLists[index].PushRange(NextObj(start), end, actulNum - 1);
         return start;
     }
+}
+
+
+void ThreadCache::Deallocate(void* ptr, size_t size)
+{
+    // 这里断言一下，防止发生错误
+    assert(size <= MAX_BYTES);
+    assert(ptr);
+    // 计算归还桶的位置
+    size_t index = SizeClass::Index(size);
+    // 头插到自由链表
+    _freeLists[index].Push(ptr);
+
+    // 判断threadCache的_freeLists中已经回收的内存有没有超过批量一次申请的内存大小
+    // 如果有则将他们批量回收
+    if (_freeLists[index].Size() >= _freeLists[index].maxSize())
+    {
+        ListTooLong(_freeLists[index], size);
+    }
+}
+
+
+void ThreadCache::ListTooLong(FreeList& list, size_t size)
+{
+    void* start = nullptr;
+    void* end = nullptr;
+    // 输出型参数, 和需要弹出的对象的个数
+    list.PopRange(start, end, list.maxSize());
+
+    // 这里参数只需要给一个start就可以，因为遍历的时候可以通过观察是否指到nullptr来判断是否遍历完毕
+    CentralCache::GetInstance()->ReleaseListToSpans(start, size);
 }
